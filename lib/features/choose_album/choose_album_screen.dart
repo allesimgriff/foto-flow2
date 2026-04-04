@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:foto_flow2/app_state.dart';
 
 /// UI-only: Albumliste mit lokaler Auswahl und Hauptbutton (ohne Navigation/Logik).
 class ChooseAlbumScreen extends StatefulWidget {
@@ -68,7 +69,13 @@ class _ChooseAlbumScreenState extends State<ChooseAlbumScreen> {
               SizedBox(
                 height: 56,
                 child: ElevatedButton(
-                  onPressed: hasSelection ? () {} : null,
+                  onPressed: hasSelection
+                      ? () {
+                          activeAlbumName = _selected!;
+                          hasAlbum = true;
+                          Navigator.pop(context, true);
+                        }
+                      : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF2E7D32),
                     foregroundColor: Colors.white,

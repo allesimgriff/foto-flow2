@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:foto_flow2/app_state.dart';
 
-/// UI-only: Albumname eingeben und Hauptbutton (ohne Navigation/Speicherung).
+/// UI-only: Albumname eingeben und Hauptbutton (ohne echte Speicherung).
 class CreateAlbumScreen extends StatefulWidget {
   const CreateAlbumScreen({super.key});
 
@@ -81,7 +82,13 @@ class _CreateAlbumScreenState extends State<CreateAlbumScreen> {
               SizedBox(
                 height: 56,
                 child: ElevatedButton(
-                  onPressed: _hasName ? () {} : null,
+                  onPressed: _hasName
+                      ? () {
+                          activeAlbumName = _nameController.text.trim();
+                          hasAlbum = true;
+                          Navigator.pop(context, true);
+                        }
+                      : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF2E7D32),
                     foregroundColor: Colors.white,
