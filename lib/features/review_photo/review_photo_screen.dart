@@ -1,7 +1,10 @@
+import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:foto_flow2/app_state.dart';
 import 'package:foto_flow2/features/choose_album/choose_album_screen.dart';
 import 'package:foto_flow2/features/create_album/create_album_screen.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void _startCamera() {
   debugPrint('Dummy: Kamera gestartet');
@@ -10,6 +13,9 @@ void _startCamera() {
 void _dummyTakePhoto() {
   debugPrint('Dummy: Foto aufnehmen');
 }
+
+bool _useRealCamera() =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
 class ReviewPhotoScreen extends StatefulWidget {
   const ReviewPhotoScreen({super.key});
@@ -20,11 +26,120 @@ class ReviewPhotoScreen extends StatefulWidget {
 
 class _ReviewPhotoScreenState extends State<ReviewPhotoScreen> {
   bool _photoTaken = false;
+  bool _capturing = false;
+  CameraController? _cameraController;
 
   @override
   void initState() {
     super.initState();
-    _startCamera();
+    if (_useRealCamera()) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _initAndroidCamera());
+    } else {
+      _startCamera();
+    }
+  }
+
+  Future<void> _initAndroidCamera() async {
+    final status = await Permission.camera.request();
+    if (!status.isGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Kamera-Berechtigung verweigert.')),
+        );
+      }
+      return;
+    }
+
+    final cameras = await availableCameras();
+    if (cameras.isEmpty || !mounted) return;
+
+    CameraDescription cam;
+    try {
+      cam = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.back,
+      );
+    } catch (_) {
+      cam = cameras.first;
+    }
+
+    final next = CameraController(
+      cam,
+      ResolutionPreset.medium,
+      enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.jpeg,
+    );
+
+    try {
+      await next.initialize();
+    } catch (e, st) {
+      debugPrint('Kamera: $e\n$st');
+      await next.dispose();
+      return;
+    }
+
+    if (!mounted) {
+      await next.dispose();
+      return;
+    }
+
+    final old = _cameraController;
+    _cameraController = next;
+    await old?.dispose();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _onShutterPressed() async {
+    if (_useRealCamera()) {
+      if (_capturing) return;
+      final c = _cameraController;
+      if (c == null || !c.value.isInitialized) return;
+
+      setState(() => _capturing = true);
+      try {
+        await c.takePicture();
+        if (!mounted) return;
+        if (activeAlbumName == null) {
+          setState(() => _photoTaken = true);
+        } else {
+          debugPrint(
+            'Dummy: Foto dem Album „$activeAlbumName“ zugeordnet',
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Demo: Foto dem Album „$activeAlbumName“ zugeordnet.',
+              ),
+            ),
+          );
+        }
+      } catch (e, st) {
+        debugPrint('Aufnahme: $e\n$st');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Foto konnte nicht aufgenommen werden.')),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _capturing = false);
+      }
+      return;
+    }
+
+    _dummyTakePhoto();
+    if (activeAlbumName == null) {
+      setState(() => _photoTaken = true);
+    } else {
+      debugPrint(
+        'Dummy: Foto dem Album „$activeAlbumName" zugeordnet',
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Demo: Foto dem Album „$activeAlbumName" zugeordnet.',
+          ),
+        ),
+      );
+    }
   }
 
   void _openCreateAlbum() {
@@ -54,8 +169,17 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen> {
   }
 
   @override
+  void dispose() {
+    _cameraController?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final c = _cameraController;
+    final previewReady =
+        _useRealCamera() && c != null && c.value.isInitialized;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
@@ -85,6 +209,33 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen> {
                       ),
                     ),
                     const SizedBox(height: 24),
+                    if (activeAlbumName != null) ...[
+                      SizedBox(
+                        height: 52,
+                        child: OutlinedButton(
+                          onPressed: () {
+                            setState(() {
+                              activeAlbumName = null;
+                              hasAlbum = false;
+                            });
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.black54,
+                            side: const BorderSide(
+                              color: Color(0xFFBDBDBD),
+                              width: 1.5,
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            textStyle: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          child: const Text('Album verlassen'),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     SizedBox(
                       height: 56,
                       child: ElevatedButton(
@@ -137,11 +288,36 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen> {
                     if (activeAlbumName != null) ...[
                       const SizedBox(height: 10),
                       Text(
-                        'Fotos werden dem Album „$activeAlbumName“ zugeordnet.',
+                        'Fotos werden dem Album „$activeAlbumName" zugeordnet.',
                         textAlign: TextAlign.center,
                         style: textTheme.bodyMedium?.copyWith(
                           color: Colors.black54,
                           height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 52,
+                        child: OutlinedButton(
+                          onPressed: () {
+                            setState(() {
+                              activeAlbumName = null;
+                              hasAlbum = false;
+                            });
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.black54,
+                            side: const BorderSide(
+                              color: Color(0xFFBDBDBD),
+                              width: 1.5,
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            textStyle: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          child: const Text('Album verlassen'),
                         ),
                       ),
                     ],
@@ -152,38 +328,50 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen> {
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Text(
-                          'Hier erscheint dein Foto',
-                          textAlign: TextAlign.center,
-                          style: textTheme.titleMedium?.copyWith(
-                            color: Colors.black87,
-                          ),
-                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: previewReady
+                            ? LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final maxW = constraints.maxWidth;
+                                  final maxH = constraints.maxHeight;
+                                  final ar = c.value.aspectRatio;
+                                  var w = maxW;
+                                  var h = w / ar;
+                                  if (h > maxH) {
+                                    h = maxH;
+                                    w = h * ar;
+                                  }
+                                  return Center(
+                                    child: SizedBox(
+                                      width: w,
+                                      height: h,
+                                      child: CameraPreview(c),
+                                    ),
+                                  );
+                                },
+                              )
+                            : Align(
+                                alignment: Alignment.center,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: Text(
+                                    'Hier erscheint dein Foto',
+                                    textAlign: TextAlign.center,
+                                    style: textTheme.titleMedium?.copyWith(
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                              ),
                       ),
                     ),
                     const SizedBox(height: 32),
                     SizedBox(
                       height: 56,
                       child: ElevatedButton(
-                        onPressed: () {
-                          _dummyTakePhoto();
-                          if (activeAlbumName == null) {
-                            setState(() => _photoTaken = true);
-                          } else {
-                            debugPrint(
-                              'Dummy: Foto dem Album „$activeAlbumName“ zugeordnet',
-                            );
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Demo: Foto dem Album „$activeAlbumName“ zugeordnet.',
-                                ),
-                              ),
-                            );
-                          }
-                        },
+                        onPressed: _capturing ? null : () => _onShutterPressed(),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF2E7D32),
                           foregroundColor: Colors.white,
