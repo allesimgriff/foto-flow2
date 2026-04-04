@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:foto_flow2/app_state.dart';
 import 'package:foto_flow2/features/choose_album/choose_album_screen.dart';
 import 'package:foto_flow2/features/create_album/create_album_screen.dart';
+import 'package:foto_flow2/features/review_photo/photo_local_save.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 void _startCamera() {
@@ -24,14 +25,18 @@ class ReviewPhotoScreen extends StatefulWidget {
   State<ReviewPhotoScreen> createState() => _ReviewPhotoScreenState();
 }
 
-class _ReviewPhotoScreenState extends State<ReviewPhotoScreen> {
+class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
+    with WidgetsBindingObserver {
   bool _photoTaken = false;
   bool _capturing = false;
   CameraController? _cameraController;
+  bool _hadAppPaused = false;
+  bool _androidCameraSetupBusy = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (_useRealCamera()) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _initAndroidCamera());
     } else {
@@ -39,53 +44,126 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen> {
     }
   }
 
-  Future<void> _initAndroidCamera() async {
-    final status = await Permission.camera.request();
-    if (!status.isGranted) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Kamera-Berechtigung verweigert.')),
-        );
-      }
-      return;
-    }
-
-    final cameras = await availableCameras();
-    if (cameras.isEmpty || !mounted) return;
-
-    CameraDescription cam;
-    try {
-      cam = cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.back,
-      );
-    } catch (_) {
-      cam = cameras.first;
-    }
-
-    final next = CameraController(
-      cam,
-      ResolutionPreset.medium,
-      enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.jpeg,
-    );
-
-    try {
-      await next.initialize();
-    } catch (e, st) {
-      debugPrint('Kamera: $e\n$st');
-      await next.dispose();
-      return;
-    }
-
-    if (!mounted) {
-      await next.dispose();
-      return;
-    }
-
+  Future<void> _disposeCameraAndClear() async {
     final old = _cameraController;
-    _cameraController = next;
-    await old?.dispose();
-    if (mounted) setState(() {});
+    _cameraController = null;
+    if (old != null) {
+      await old.dispose();
+    }
+  }
+
+  void _pauseCameraPreviewSafely() {
+    final c = _cameraController;
+    if (c == null || !c.value.isInitialized) return;
+    c.pausePreview().catchError((Object e, StackTrace st) {
+      debugPrint('Kamera pause: $e\n$st');
+    });
+  }
+
+  void _restoreCameraAfterBackground() {
+    _restoreCameraAfterBackgroundAsync().catchError((Object e, StackTrace st) {
+      debugPrint('Kamera nach Hintergrund: $e\n$st');
+    });
+  }
+
+  Future<void> _restoreCameraAfterBackgroundAsync() async {
+    if (!_useRealCamera() || !mounted) return;
+    final perm = await Permission.camera.status;
+    if (!perm.isGranted) return;
+    final c = _cameraController;
+    if (c != null && c.value.isInitialized && !c.value.hasError) {
+      if (c.value.isPreviewPaused) {
+        try {
+          await c.resumePreview();
+        } catch (e, st) {
+          debugPrint('Kamera resume: $e\n$st');
+          await _disposeCameraAndClear();
+          if (mounted) await _initAndroidCamera();
+        }
+      }
+      if (mounted) setState(() {});
+      return;
+    }
+    await _disposeCameraAndClear();
+    if (mounted) await _initAndroidCamera();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_useRealCamera()) return;
+    if (state == AppLifecycleState.paused) {
+      _hadAppPaused = true;
+      _pauseCameraPreviewSafely();
+    } else if (state == AppLifecycleState.resumed && _hadAppPaused) {
+      _hadAppPaused = false;
+      _restoreCameraAfterBackground();
+    }
+  }
+
+  Future<void> _initAndroidCamera() async {
+    if (!_useRealCamera()) return;
+    while (_androidCameraSetupBusy) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+      if (!mounted) return;
+    }
+    final ready = _cameraController;
+    if (ready != null &&
+        ready.value.isInitialized &&
+        !ready.value.hasError) {
+      return;
+    }
+
+    _androidCameraSetupBusy = true;
+    try {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Kamera-Berechtigung verweigert.')),
+          );
+        }
+        return;
+      }
+
+      final cameras = await availableCameras();
+      if (cameras.isEmpty || !mounted) return;
+
+      CameraDescription cam;
+      try {
+        cam = cameras.firstWhere(
+          (c) => c.lensDirection == CameraLensDirection.back,
+        );
+      } catch (_) {
+        cam = cameras.first;
+      }
+
+      final next = CameraController(
+        cam,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+      try {
+        await next.initialize();
+      } catch (e, st) {
+        debugPrint('Kamera: $e\n$st');
+        await next.dispose();
+        return;
+      }
+
+      if (!mounted) {
+        await next.dispose();
+        return;
+      }
+
+      final old = _cameraController;
+      _cameraController = next;
+      await old?.dispose();
+      if (mounted) setState(() {});
+    } finally {
+      _androidCameraSetupBusy = false;
+    }
   }
 
   Future<void> _onShutterPressed() async {
@@ -96,7 +174,12 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen> {
 
       setState(() => _capturing = true);
       try {
-        await c.takePicture();
+        final xfile = await c.takePicture();
+        try {
+          await saveCapturedPhotoToAppDir(xfile.path, activeAlbumName);
+        } catch (e, st) {
+          debugPrint('Speichern: $e\n$st');
+        }
         if (!mounted) return;
         if (activeAlbumName == null) {
           setState(() => _photoTaken = true);
@@ -170,7 +253,10 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen> {
 
   @override
   void dispose() {
-    _cameraController?.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    final c = _cameraController;
+    _cameraController = null;
+    c?.dispose();
     super.dispose();
   }
 
