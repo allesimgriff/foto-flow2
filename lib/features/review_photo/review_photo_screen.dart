@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
@@ -32,6 +34,7 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
   CameraController? _cameraController;
   bool _hadAppPaused = false;
   bool _androidCameraSetupBusy = false;
+  Uint8List? _lastPreviewBytes;
 
   @override
   void initState() {
@@ -101,6 +104,7 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
   }
 
   Future<void> _initAndroidCamera() async {
+    debugPrint('[cam] _initAndroidCamera start');
     if (!_useRealCamera()) return;
     while (_androidCameraSetupBusy) {
       await Future<void>.delayed(const Duration(milliseconds: 16));
@@ -116,6 +120,7 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
     _androidCameraSetupBusy = true;
     try {
       final status = await Permission.camera.request();
+      debugPrint('[cam] Permission.camera.request → $status');
       if (!status.isGranted) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -126,6 +131,7 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
       }
 
       final cameras = await availableCameras();
+      debugPrint('[cam] availableCameras → count=${cameras.length}');
       if (cameras.isEmpty || !mounted) return;
 
       CameraDescription cam;
@@ -146,7 +152,9 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
 
       try {
         await next.initialize();
+        debugPrint('[cam] initialize() OK');
       } catch (e, st) {
+        debugPrint('[cam] initialize() Fehler');
         debugPrint('Kamera: $e\n$st');
         await next.dispose();
         return;
@@ -167,6 +175,7 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
   }
 
   Future<void> _onShutterPressed() async {
+    debugPrint('[cam] _onShutterPressed start');
     if (_useRealCamera()) {
       if (_capturing) return;
       final c = _cameraController;
@@ -175,14 +184,23 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
       setState(() => _capturing = true);
       try {
         final xfile = await c.takePicture();
+        debugPrint('[cam] takePicture() → ${xfile.path}');
         try {
+          debugPrint('[cam] vor saveCapturedPhotoToAppDir path=${xfile.path}');
           await saveCapturedPhotoToAppDir(xfile.path, activeAlbumName);
+          debugPrint('[cam] nach saveCapturedPhotoToAppDir OK');
         } catch (e, st) {
+          debugPrint('[cam] nach saveCapturedPhotoToAppDir Fehler');
           debugPrint('Speichern: $e\n$st');
         }
         if (!mounted) return;
         if (activeAlbumName == null) {
-          setState(() => _photoTaken = true);
+          final bytes = await xfile.readAsBytes();
+          if (!mounted) return;
+          setState(() {
+            _photoTaken = true;
+            _lastPreviewBytes = bytes;
+          });
         } else {
           debugPrint(
             'Dummy: Foto dem Album „$activeAlbumName“ zugeordnet',
@@ -233,7 +251,10 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
       ),
     ).then((saved) {
       if (saved == true && mounted) {
-        setState(() => _photoTaken = false);
+        setState(() {
+          _photoTaken = false;
+          _lastPreviewBytes = null;
+        });
       }
     });
   }
@@ -246,7 +267,10 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
       ),
     ).then((saved) {
       if (saved == true && mounted) {
-        setState(() => _photoTaken = false);
+        setState(() {
+          _photoTaken = false;
+          _lastPreviewBytes = null;
+        });
       }
     });
   }
@@ -283,15 +307,21 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(12),
                         ),
+                        clipBehavior: Clip.antiAlias,
                         alignment: Alignment.center,
                         padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Text(
-                          'Foto aufgenommen (Demo)',
-                          textAlign: TextAlign.center,
-                          style: textTheme.titleLarge?.copyWith(
-                            color: Colors.black87,
-                          ),
-                        ),
+                        child: _lastPreviewBytes != null
+                            ? Image.memory(
+                                _lastPreviewBytes!,
+                                fit: BoxFit.contain,
+                              )
+                            : Text(
+                                'Foto aufgenommen (Demo)',
+                                textAlign: TextAlign.center,
+                                style: textTheme.titleLarge?.copyWith(
+                                  color: Colors.black87,
+                                ),
+                              ),
                       ),
                     ),
                     const SizedBox(height: 24),
