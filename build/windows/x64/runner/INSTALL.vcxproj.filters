@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\Beck\foto-flow2\build\windows\x64\CMakeFiles\64457c8e6792b1bdf37121979a1da9fc\INSTALL_force.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{AC3040A7-72F2-3CB9-9DEF-EA9ABCBA8A68}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

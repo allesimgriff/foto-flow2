@@ -1,0 +1,15 @@
+# Target labels
+ nuget-populate
+# Source files and their labels
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/nuget-populate
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/24d31d5cfc9d21ce71ea69fca1633fb2/nuget-populate.rule
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/e265db709628d4aa553e681fd2c8b4c1/nuget-populate-complete.rule
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/a014b3bb4f615ab54ed1d39ba111ef8c/nuget-populate-build.rule
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/a014b3bb4f615ab54ed1d39ba111ef8c/nuget-populate-configure.rule
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/a014b3bb4f615ab54ed1d39ba111ef8c/nuget-populate-copyfile.rule
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/a014b3bb4f615ab54ed1d39ba111ef8c/nuget-populate-download.rule
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/a014b3bb4f615ab54ed1d39ba111ef8c/nuget-populate-install.rule
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/a014b3bb4f615ab54ed1d39ba111ef8c/nuget-populate-mkdir.rule
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/a014b3bb4f615ab54ed1d39ba111ef8c/nuget-populate-patch.rule
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/a014b3bb4f615ab54ed1d39ba111ef8c/nuget-populate-test.rule
+C:/Users/Beck/foto-flow2/build/windows/x64/_deps/nuget-subbuild/CMakeFiles/a014b3bb4f615ab54ed1d39ba111ef8c/nuget-populate-update.rule

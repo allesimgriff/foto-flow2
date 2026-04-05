@@ -3,6 +3,12 @@ import 'package:foto_flow2/app_state.dart';
 import 'package:foto_flow2/features/review_photo/photo_local_image.dart';
 import 'package:foto_flow2/features/review_photo/photo_local_read.dart';
 
+String _savePhotoBasename(String path) {
+  final n = path.replaceAll(r'\', '/');
+  final i = n.lastIndexOf('/');
+  return i < 0 ? n : n.substring(i + 1);
+}
+
 /// UI-only: Zielalbum anzeigen, gespeicherte Fotos als Bilder, Speichern-Button.
 class SavePhotoScreen extends StatefulWidget {
   const SavePhotoScreen({super.key});
@@ -148,15 +154,34 @@ class _SavePhotoScreenState extends State<SavePhotoScreen> {
                                       childAspectRatio: 4 / 3,
                                     ),
                                 itemBuilder: (context, index) {
+                                  final path = visiblePaths[index];
                                   return GestureDetector(
-                                    onTap: () => setState(
-                                      () => _previewPath = visiblePaths[index],
-                                    ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: savedPhotoFileImage(
-                                        visiblePaths[index],
-                                      ),
+                                    onTap: () =>
+                                        setState(() => _previewPath = path),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Expanded(
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                            child: savedPhotoFileImage(path),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          _savePhotoBasename(path),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: textTheme.labelSmall?.copyWith(
+                                            color: Colors.black54,
+                                            fontSize: 9,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   );
                                 },
