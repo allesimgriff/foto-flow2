@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io' show File;
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
@@ -6,7 +8,10 @@ import 'package:flutter/material.dart';
 import 'package:foto_flow2/app_state.dart';
 import 'package:foto_flow2/features/choose_album/choose_album_screen.dart';
 import 'package:foto_flow2/features/create_album/create_album_screen.dart';
+import 'package:foto_flow2/features/privacy_notice/privacy_notice_screen.dart';
 import 'package:foto_flow2/features/review_photo/photo_local_save.dart';
+import 'package:foto_flow2/features/save_photo/save_photo_screen.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 void _startCamera() {
@@ -29,12 +34,21 @@ class ReviewPhotoScreen extends StatefulWidget {
 
 class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
     with WidgetsBindingObserver {
+  /// Minimales gültiges JPEG (1×1 px), nur wenn keine echte Aufnahme möglich ist.
+  static final Uint8List _kFallbackJpegBytes = Uint8List.fromList(
+    base64Decode(
+      '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCDwAD//2Q==',
+    ),
+  );
+
   bool _photoTaken = false;
   bool _capturing = false;
   CameraController? _cameraController;
   bool _hadAppPaused = false;
   bool _androidCameraSetupBusy = false;
   Uint8List? _lastPreviewBytes;
+  /// Pfad der zuletzt unter `ohne_album` gespeicherten Datei (für nachträgliche Album-Zuordnung).
+  String? _lastOhneAlbumSavedPath;
 
   @override
   void initState() {
@@ -174,45 +188,93 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
     }
   }
 
+  Future<String?> _writeFallbackJpegTempPath() async {
+    try {
+      final dir = await getTemporaryDirectory();
+      final path =
+          '${dir.path}/foto_flow2_fallback_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await File(path).writeAsBytes(_kFallbackJpegBytes);
+      debugPrint('[cam] Fallback-JPEG → $path');
+      return path;
+    } catch (e, st) {
+      debugPrint('[cam] Fallback-JPEG fehlgeschlagen: $e\n$st');
+      return null;
+    }
+  }
+
+  Future<void> _completeRealCameraSaveFromPath(String sourcePath) async {
+    final albumAtSave = activeAlbumName;
+    String? savedPath;
+    try {
+      debugPrint('[cam] vor saveCapturedPhotoToAppDir path=$sourcePath');
+      savedPath =
+          await saveCapturedPhotoToAppDir(sourcePath, activeAlbumName);
+      debugPrint('[cam] nach saveCapturedPhotoToAppDir OK');
+    } catch (e, st) {
+      debugPrint('[cam] nach saveCapturedPhotoToAppDir Fehler');
+      debugPrint('Speichern: $e\n$st');
+    }
+    if (mounted) {
+      if (albumAtSave == null) {
+        _lastOhneAlbumSavedPath = savedPath;
+      } else {
+        _lastOhneAlbumSavedPath = null;
+      }
+    }
+    if (!mounted) return;
+    if (activeAlbumName == null) {
+      final bytes = await File(sourcePath).readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _photoTaken = true;
+        _lastPreviewBytes = bytes;
+      });
+    } else {
+      debugPrint(
+        'Dummy: Foto dem Album „$activeAlbumName“ zugeordnet',
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Demo: Foto dem Album „$activeAlbumName“ zugeordnet.',
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _onShutterPressed() async {
     debugPrint('[cam] _onShutterPressed start');
     if (_useRealCamera()) {
       if (_capturing) return;
       final c = _cameraController;
-      if (c == null || !c.value.isInitialized) return;
 
       setState(() => _capturing = true);
       try {
-        final xfile = await c.takePicture();
-        debugPrint('[cam] takePicture() → ${xfile.path}');
-        try {
-          debugPrint('[cam] vor saveCapturedPhotoToAppDir path=${xfile.path}');
-          await saveCapturedPhotoToAppDir(xfile.path, activeAlbumName);
-          debugPrint('[cam] nach saveCapturedPhotoToAppDir OK');
-        } catch (e, st) {
-          debugPrint('[cam] nach saveCapturedPhotoToAppDir Fehler');
-          debugPrint('Speichern: $e\n$st');
-        }
-        if (!mounted) return;
-        if (activeAlbumName == null) {
-          final bytes = await xfile.readAsBytes();
-          if (!mounted) return;
-          setState(() {
-            _photoTaken = true;
-            _lastPreviewBytes = bytes;
-          });
+        String? sourcePath;
+        if (c != null && c.value.isInitialized) {
+          try {
+            final xfile = await c.takePicture();
+            debugPrint('[cam] takePicture() → ${xfile.path}');
+            sourcePath = xfile.path;
+          } catch (e, st) {
+            debugPrint('[cam] takePicture fehlgeschlagen → Fallback\n$e\n$st');
+          }
         } else {
-          debugPrint(
-            'Dummy: Foto dem Album „$activeAlbumName“ zugeordnet',
-          );
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Demo: Foto dem Album „$activeAlbumName“ zugeordnet.',
-              ),
-            ),
-          );
+          debugPrint('[cam] Kamera nicht bereit → Fallback');
         }
+        sourcePath ??= await _writeFallbackJpegTempPath();
+        if (sourcePath == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Foto konnte nicht aufgenommen werden.'),
+              ),
+            );
+          }
+          return;
+        }
+        await _completeRealCameraSaveFromPath(sourcePath);
       } catch (e, st) {
         debugPrint('Aufnahme: $e\n$st');
         if (mounted) {
@@ -243,19 +305,32 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
     }
   }
 
+  Future<void> _assignLastOhneAlbumIfNeeded() async {
+    final path = _lastOhneAlbumSavedPath;
+    final name = activeAlbumName?.trim();
+    if (path == null || name == null || name.isEmpty) return;
+    try {
+      await moveSavedPhotoIntoAlbumDir(path, name);
+      _lastOhneAlbumSavedPath = null;
+    } catch (e, st) {
+      debugPrint('Album-Zuordnung: $e\n$st');
+    }
+  }
+
   void _openCreateAlbum() {
     Navigator.push<bool>(
       context,
       MaterialPageRoute<bool>(
         builder: (context) => const CreateAlbumScreen(),
       ),
-    ).then((saved) {
-      if (saved == true && mounted) {
-        setState(() {
-          _photoTaken = false;
-          _lastPreviewBytes = null;
-        });
-      }
+    ).then((saved) async {
+      if (saved != true || !mounted) return;
+      await _assignLastOhneAlbumIfNeeded();
+      if (!mounted) return;
+      setState(() {
+        _photoTaken = false;
+        _lastPreviewBytes = null;
+      });
     });
   }
 
@@ -265,13 +340,14 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
       MaterialPageRoute<bool>(
         builder: (context) => const ChooseAlbumScreen(),
       ),
-    ).then((saved) {
-      if (saved == true && mounted) {
-        setState(() {
-          _photoTaken = false;
-          _lastPreviewBytes = null;
-        });
-      }
+    ).then((saved) async {
+      if (saved != true || !mounted) return;
+      await _assignLastOhneAlbumIfNeeded();
+      if (!mounted) return;
+      setState(() {
+        _photoTaken = false;
+        _lastPreviewBytes = null;
+      });
     });
   }
 
@@ -291,12 +367,14 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
     final previewReady =
         _useRealCamera() && c != null && c.value.isInitialized;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F7F7),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-          child: _photoTaken
+    return PopScope(
+      canPop: !(_photoTaken && activeAlbumName == null),
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF7F7F7),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+            child: _photoTaken
               ? Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -325,33 +403,6 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
                       ),
                     ),
                     const SizedBox(height: 24),
-                    if (activeAlbumName != null) ...[
-                      SizedBox(
-                        height: 52,
-                        child: OutlinedButton(
-                          onPressed: () {
-                            setState(() {
-                              activeAlbumName = null;
-                              hasAlbum = false;
-                            });
-                          },
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.black54,
-                            side: const BorderSide(
-                              color: Color(0xFFBDBDBD),
-                              width: 1.5,
-                            ),
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            textStyle: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          child: const Text('Album verlassen'),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
                     SizedBox(
                       height: 56,
                       child: ElevatedButton(
@@ -400,6 +451,42 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
                       style: textTheme.titleLarge?.copyWith(
                         color: Colors.black87,
                       ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push<void>(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (context) => const SavePhotoScreen(),
+                          ),
+                        );
+                      },
+                      style: TextButton.styleFrom(
+                        foregroundColor: Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withOpacity(0.75),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: const Text('Gespeicherte Fotos'),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push<void>(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (context) => const PrivacyNoticeScreen(),
+                          ),
+                        );
+                      },
+                      style: TextButton.styleFrom(
+                        foregroundColor: Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withOpacity(0.75),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: const Text('Datenschutz'),
                     ),
                     if (activeAlbumName != null) ...[
                       const SizedBox(height: 10),
@@ -504,6 +591,7 @@ class _ReviewPhotoScreenState extends State<ReviewPhotoScreen>
                     ),
                   ],
                 ),
+          ),
         ),
       ),
     );
